@@ -8,7 +8,6 @@ import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDateTime;
-import java.util.Set;
 
 @Entity
 @Table(name = "users")
@@ -26,13 +25,13 @@ public class User {
     @Column(unique = true, nullable = false)
     private String email;
 
-    @Column(name = "first_name")
+    @Column(name = "first_name", nullable = false)
     private String firstName;
 
-    @Column(name = "last_name")
+    @Column(name = "last_name", nullable = false)
     private String lastName;
 
-    @Column(name = "phone_number")
+    @Column(name = "phone_number", unique = true)
     private String phoneNumber;
 
     @Column(name = "profile_picture_url")
@@ -45,7 +44,7 @@ public class User {
     @Column(name = "is_active")
     private Boolean isActive = true;
 
-    @Column(name = "subscription_status")
+    @Column(name = "subscription_status", nullable = false)
     @Enumerated(EnumType.STRING)
     private SubscriptionStatus subscriptionStatus = SubscriptionStatus.FREE;
 
@@ -69,5 +68,12 @@ public class User {
 
     public enum SubscriptionStatus {
         FREE, BASIC, PREMIUM, EXPIRED
+    }
+
+    public void setRole(UserRole role) {
+        if (this.role != null) {
+            throw new UnsupportedOperationException("Role cannot be changed after account creation");
+        }
+        this.role = role;
     }
 }

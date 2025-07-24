@@ -34,10 +34,14 @@ public class SecurityConfig {
             .authorizeHttpRequests(authz -> authz
                 // Public endpoints
                 .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
+                .requestMatchers("/api/auth/callback", "/api/auth/login-urls").permitAll()
+                .requestMatchers("/api/auth/reset-password", "/api/auth/validate-password").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 // Swagger/OpenAPI endpoints
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs/**").permitAll()
                 .requestMatchers("/swagger-resources/**", "/webjars/**").permitAll()
+                // Auth callback endpoint for Keycloak
+                .requestMatchers("/auth/callback").permitAll()
                 // Role-based endpoints
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .requestMatchers("/api/instructor/**").hasAnyRole("INSTRUCTOR", "ADMIN")

@@ -2,6 +2,8 @@ package com.edu.auth_service.controller;
 
 import com.edu.auth_service.dto.*;
 import com.edu.auth_service.service.AuthService;
+import com.edu.auth_service.service.KeycloakCallbackService;
+import com.edu.auth_service.service.KeycloakPasswordService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
@@ -9,6 +11,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -16,15 +19,24 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.validation.Valid;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 @Validated
-@Tag(name = "Authentication", description = "Authentication and user management endpoints")
+@Tag(name = "Authentication", description = "Authentication and user management endpoints with Keycloak identity brokering")
 public class AuthController {
 
     private final AuthService authService;
+    private final KeycloakCallbackService keycloakCallbackService;
+    private final KeycloakPasswordService keycloakPasswordService;
+
+    @Value("${app.keycloak.google-login-url}")
+    private String googleLoginUrl;
+
+    @Value("${app.keycloak.login-url}")
+    private String loginUrl;
 
     @PostMapping("/register")
     @Operation(summary = "Register a new user", description = "Creates a new user account in both Keycloak and local database")
@@ -98,6 +110,72 @@ public class AuthController {
         // Keycloak handles logout through its own endpoints
         // This endpoint can be used for additional cleanup if needed
         return ResponseEntity.ok().build();
+    }
+
+    @GetMapping("/login-urls")
+    @Operation(summary = "Get authentication URLs", description = "Returns Keycloak authentication URLs for frontend")
+    @ApiResponse(responseCode = "200", description = "Authentication URLs retrieved successfully")
+    public ResponseEntity<Map<String, String>> getLoginUrls() {
+        Map<String, String> urls = Map.of(
+            "regularLogin", loginUrl,
+            "googleLogin", googleLoginUrl
+        );
+        return ResponseEntity.ok(urls);
+    }
+
+    @PostMapping("/callback")
+    @Operation(summary = "OAuth callback handler", description = "Handles OAuth callback from Keycloak (including Google OAuth)")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "OAuth callback processed successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid authorization code"),
+        @ApiResponse(responseCode = "401", description = "Authentication failed")
+    })
+    public ResponseEntity<AuthResponse> handleOAuthCallback(@Valid @RequestBody AuthCallbackRequest request) {
+        AuthResponse response = keycloakCallbackService.handleAuthCallback(request);
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/callback")
+    @Operation(summary = "OAuth callback redirect", description = "Handles OAuth callback redirect from Keycloak")
+    public ResponseEntity<Map<String, String>> handleOAuthCallbackRedirect(
+            @RequestParam String code,
+            @RequestParam(required = false) String state) {
+
+        // Return the authorization code to the frontend
+        // Frontend should then call POST /callback with this code
+        Map<String, String> response = Map.of(
+            "code", code,
+            "message", "Authorization code received. Use POST /api/auth/callback to complete authentication."
+        );
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/change-password")
+    @Operation(summary = "Change user password", description = "Changes the current user's password using Keycloak")
+    @SecurityRequirement(name = "Bearer Authentication")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Password changed successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid password or validation failed"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    public ResponseEntity<String> changePassword(
+            Authentication authentication,
+            @Valid @RequestBody ChangePasswordWithOldPasswordRequest request) {
+        String userId = extractUserIdFromToken(authentication);
+        keycloakPasswordService.changePasswordWithOldPassword(userId, request);
+        return ResponseEntity.ok("Password changed successfully");
+    }
+
+    @PostMapping("/send-password-reset")
+    @Operation(summary = "Send password reset email", description = "Sends password reset email via Keycloak")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Password reset email sent successfully"),
+        @ApiResponse(responseCode = "400", description = "Invalid email"),
+        @ApiResponse(responseCode = "404", description = "User not found")
+    })
+    public ResponseEntity<String> sendPasswordReset(@RequestBody ChangePasswordWithEmailRequest request) {
+        keycloakPasswordService.sendPasswordResetEmail(request);
+        return ResponseEntity.ok("Password reset email sent successfully");
     }
 
     private String extractUserIdFromToken(Authentication authentication) {
