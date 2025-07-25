@@ -115,7 +115,7 @@ public class KeycloakPasswordService {
 
             // Verify old password by attempting to get a token with old credentials
             if (!verifyCurrentPasswordWithKeycloak(user.getUsername(), request.getOldPassword())) {
-                log.warn("Password verification failed: {} | {}", user.getEmail(), request.getOldPassword());
+                log.warn("Password verification failed for user: {}", user.getEmail());
                 throw new RuntimeException("Current password is incorrect");
             }
             log.info("Current password verification successful for user: {}", user.getEmail());
