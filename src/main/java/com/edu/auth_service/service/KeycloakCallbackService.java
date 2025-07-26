@@ -82,7 +82,7 @@ public class KeycloakCallbackService {
             formData.add("client_id", clientId);
             formData.add("client_secret", clientSecret);
             formData.add("code", code);
-            formData.add("redirect_uri", "http://localhost:8081/auth/callback");
+            formData.add("redirect_uri", redirectUri);
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
