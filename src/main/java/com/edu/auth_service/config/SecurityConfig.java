@@ -35,7 +35,7 @@ public class SecurityConfig {
                 // Public endpoints
                 .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
                 .requestMatchers("/api/auth/callback", "/api/auth/login-urls").permitAll()
-                .requestMatchers("/api/auth/validate-password").permitAll()
+                .requestMatchers("/api/auth/diagnose", "api/auth/health").permitAll()
                 .requestMatchers("/actuator/**").permitAll()
                 // Swagger/OpenAPI endpoints
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**", "/api-docs/**").permitAll()

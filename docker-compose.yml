@@ -1,6 +1,7 @@
 version: '3.9'
 
 services:
+  # Keycloak Database
   postgres-keycloak:
     image: postgres:latest
     container_name: postgres-keycloak
@@ -15,6 +16,7 @@ services:
     networks:
       - edunex-platform-network
 
+  # Keycloak Identity Provider
   keycloak:
     image: quay.io/keycloak/keycloak:23.0.4
     container_name: keycloak
@@ -37,35 +39,33 @@ services:
     networks:
       - edunex-platform-network
 
-  postgres-auth:
-    image: postgres:latest
-    container_name: postgres-auth
-    environment:
-      POSTGRES_DB: auth_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-    ports:
-      - "5432:5432"
-    volumes:
-      - auth_postgres_data:/var/lib/postgresql/data
-    networks:
-      - edunex-platform-network
-
-  rabbitmq:
-    image: rabbitmq:3-management
-    container_name: rabbitmq
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    networks:
-      - edunex-platform-network
+#  auth-service:
+#    build: .
+#    container_name: auth-service
+#    environment:
+#      SERVER_PORT: 8081
+#      KEYCLOAK_SERVER_URL: http://keycloak:8080
+#      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-edunex-realm}
+#      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-auth-service}
+#      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-your-client-secret}
+#      KEYCLOAK_REDIRECT_URI: ${KEYCLOAK_REDIRECT_URI:-http://localhost:3000/auth/callback}
+#      LOG_LEVEL_SECURITY: INFO
+#      LOG_LEVEL_KEYCLOAK: INFO
+#      LOG_LEVEL_SPRING: INFO
+#    ports:
+#      - "8081:8081"
+#    depends_on:
+#      - keycloak
+#    networks:
+#      - edunex-platform-network
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
 
 volumes:
   keycloak_postgres_data:
-  auth_postgres_data:
 
 networks:
   edunex-platform-network:
