@@ -37,12 +37,12 @@ public class KeycloakCallbackService {
     @Value("${keycloak.server-url}")
     private String serverUrl;
 
-    @Value("${app.keycloak.redirect-uri:http://localhost:3000/auth/callback}")
+    @Value("${KEYCLOAK_REDIRECT_URI}")
     private String redirectUri;
 
     public AuthResponse handleAuthCallback(AuthCallbackRequest request) {
         try {
-            log.info("Processing OAuth callback for authorization code: {}", 
+            log.info("Processing OAuth callback for authorization code: {}",
                 request.getCode().substring(0, 10) + "...");
 
             // Exchange authorization code for tokens
@@ -77,6 +77,8 @@ public class KeycloakCallbackService {
     @SuppressWarnings("unchecked")
     private Map<String, Object> exchangeCodeForTokens(String code) {
         try {
+            log.debug("Exchanging authorization code for tokens using redirect_uri: {}", redirectUri);
+
             MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
             formData.add("grant_type", "authorization_code");
             formData.add("client_id", clientId);
@@ -91,18 +93,21 @@ public class KeycloakCallbackService {
                 new HttpEntity<>(formData, headers);
 
             String tokenUrl = serverUrl + "/realms/" + realm + "/protocol/openid-connect/token";
+            log.debug("Token exchange URL: {}", tokenUrl);
 
             Map<String, Object> response = restTemplate.postForObject(
                 tokenUrl, request, Map.class);
 
             if (response != null && response.containsKey("access_token")) {
+                log.debug("Token exchange successful");
                 return response;
             } else {
                 throw new RuntimeException("Failed to exchange authorization code for tokens");
             }
 
         } catch (Exception e) {
-            log.error("Token exchange failed: ", e);
+            log.error("Token exchange failed for redirect_uri: {}. Error: {}", redirectUri, e.getMessage());
+            log.error("Please ensure the redirect_uri matches exactly what's configured in Keycloak client settings");
             throw new RuntimeException("Token exchange failed: " + e.getMessage());
         }
     }
