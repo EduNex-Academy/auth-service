@@ -43,10 +43,10 @@ public class AuthService {
     private String serverUrl;
 
     /**
-     * Register a new user in Keycloak
+     * Register a new user in Keycloak.
      * Keycloak is the single source of truth
      */
-    public AuthResponse registerUser(UserRegistrationRequest request) {
+    public Map<String, Object> registerUser(UserRegistrationRequest request) {
         try {
             log.info("Registering user: {}", request.getUsername());
             
@@ -62,7 +62,7 @@ public class AuthService {
             String keycloakUserId = createKeycloakUser(request);
             log.info("User created in Keycloak with ID: {}", keycloakUserId);
 
-            // Assign role to user
+            // Assign a role to user
             assignRoleToUser(keycloakUserId, request.getRole());
             log.info("Role {} assigned to user {}", request.getRole(), keycloakUserId);
 
@@ -80,7 +80,7 @@ public class AuthService {
      * Uses OAuth2 Resource Owner Password Credentials Grant
      */
     @SuppressWarnings("unchecked")
-    public AuthResponse authenticateUser(String username, String password) {
+    public Map<String, Object> authenticateUser(String username, String password) {
         try {
             log.info("Authenticating user: {}", username);
 
@@ -109,13 +109,20 @@ public class AuthService {
                 // Get user profile from Keycloak
                 UserProfileResponse userProfile = getUserProfileFromKeycloak(username);
 
-                return new AuthResponse(
+                // Create AuthResponse without refresh token for response body
+                AuthResponse authResponse = new AuthResponse(
                     (String) response.get("access_token"),
-                    (String) response.get("refresh_token"),
                     "Bearer",
                     ((Number) response.get("expires_in")).longValue(),
                     userProfile
                 );
+
+                // Return both refresh token and auth response
+                Map<String, Object> result = new HashMap<>();
+                result.put("refreshToken", (String) response.get("refresh_token"));
+                result.put("authResponse", authResponse);
+
+                return result;
             } else {
                 throw new RuntimeException("Authentication failed - invalid response");
             }
@@ -129,7 +136,7 @@ public class AuthService {
      * Refresh JWT token using refresh token
      */
     @SuppressWarnings("unchecked")
-    public AuthResponse refreshToken(String refreshToken) {
+    public Map<String, Object> refreshToken(String refreshToken) {
         try {
             log.info("Refreshing token");
 
@@ -152,13 +159,20 @@ public class AuthService {
             if (response != null && response.containsKey("access_token")) {
                 log.info("Token refreshed successfully");
                 
-                return new AuthResponse(
+                // Create AuthResponse without refresh token for response body
+                AuthResponse authResponse = new AuthResponse(
                     (String) response.get("access_token"),
-                    (String) response.get("refresh_token"),
                     "Bearer",
                     ((Number) response.get("expires_in")).longValue(),
-                    null
+                    null // No user profile needed for token refresh
                 );
+
+                // Return both refresh token and auth response
+                Map<String, Object> result = new HashMap<>();
+                result.put("refreshToken", (String) response.get("refresh_token"));
+                result.put("authResponse", authResponse);
+
+                return result;
             } else {
                 throw new RuntimeException("Token refresh failed");
             }
@@ -234,7 +248,27 @@ public class AuthService {
         }
     }
 
-    // Private helper methods
+    /**
+     * Automatically logout user from Keycloak by invalidating all sessions
+     * This performs server-side logout without showing Keycloak UI
+     */
+    public void logoutUser(String userId) {
+        try {
+            log.info("Initiating automatic logout for user ID: {}", userId);
+
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UserResource userResource = realmResource.users().get(userId);
+
+            // Invalidate all user sessions
+            userResource.logout();
+
+            log.info("User {} successfully logged out from all sessions", userId);
+
+        } catch (Exception e) {
+            log.error("Error during automatic logout for user {}: {}", userId, e.getMessage());
+            throw new RuntimeException("Failed to logout user: " + e.getMessage());
+        }
+    }
 
     /**
      * Validate Keycloak connection and permissions

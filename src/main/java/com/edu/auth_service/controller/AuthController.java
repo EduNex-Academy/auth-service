@@ -4,8 +4,8 @@ import com.edu.auth_service.dto.*;
 import com.edu.auth_service.service.AuthService;
 import com.edu.auth_service.service.KeycloakCallbackService;
 import com.edu.auth_service.service.KeycloakPasswordService;
+import com.edu.auth_service.config.CookieConfig;
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
@@ -13,13 +13,20 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+
+import java.time.Duration;
+import java.util.HashMap;
 import java.util.Map;
 
 @RestController
@@ -33,9 +40,13 @@ public class AuthController {
     private final AuthService authService;
     private final KeycloakCallbackService keycloakCallbackService;
     private final KeycloakPasswordService keycloakPasswordService;
+    private final CookieConfig cookieConfig;
 
     @Value("${app.keycloak.google-login-url}")
     private String googleLoginUrl;
+
+    @Value("${app.keycloak.admin-google-login-url}")
+    private String adminGoogleLoginUrl;
 
     @Value("${app.keycloak.login-url}")
     private String loginUrl;
@@ -56,9 +67,18 @@ public class AuthController {
         log.info("Registration request for user: {}", request.getUsername());
         
         try {
-            AuthResponse response = authService.registerUser(request);
+            Map<String, Object> authResult = authService.registerUser(request);
             log.info("User {} registered successfully", request.getUsername());
-            return ResponseEntity.ok(response);
+
+            // Create secure HttpOnly cookie for refresh token
+            ResponseCookie refreshTokenCookie = createRefreshTokenCookie((String) authResult.get("refreshToken"));
+
+            // Return only access token in response body
+            AuthResponse response = (AuthResponse) authResult.get("authResponse");
+
+            return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
+                .body(response);
         } catch (Exception e) {
             log.error("Registration failed for user {}: {}", request.getUsername(), e.getMessage());
             throw e;
@@ -77,9 +97,18 @@ public class AuthController {
         log.info("Login request for user: {}", request.getUsername());
         
         try {
-            AuthResponse response = authService.authenticateUser(request.getUsername(), request.getPassword());
+            Map<String, Object> authResult = authService.authenticateUser(request.getUsername(), request.getPassword());
             log.info("User {} logged in successfully", request.getUsername());
-            return ResponseEntity.ok(response);
+
+            // Create secure HttpOnly cookie for refresh token
+            ResponseCookie refreshTokenCookie = createRefreshTokenCookie((String) authResult.get("refreshToken"));
+
+            // Return only access token in response body
+            AuthResponse response = (AuthResponse) authResult.get("authResponse");
+
+            return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
+                .body(response);
         } catch (Exception e) {
             log.error("Login failed for user {}: {}", request.getUsername(), e.getMessage());
             throw e;
@@ -88,24 +117,78 @@ public class AuthController {
 
     @PostMapping("/refresh")
     @Operation(summary = "Refresh JWT token", 
-               description = "Generates new access token using valid refresh token")
+               description = "Generates new access token using refresh token from HttpOnly cookie")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Token refreshed successfully"),
         @ApiResponse(responseCode = "401", description = "Invalid or expired refresh token"),
         @ApiResponse(responseCode = "500", description = "Token refresh service error")
     })
-    public ResponseEntity<AuthResponse> refreshToken(
-            @Parameter(description = "Valid refresh token") 
-            @RequestParam String refreshToken) {
-        
+    public ResponseEntity<AuthResponse> refreshToken(HttpServletRequest request) {
         log.info("Token refresh request");
-        
+
         try {
-            AuthResponse response = authService.refreshToken(refreshToken);
+            // Extract refresh token from HttpOnly cookie
+            String refreshToken = extractRefreshTokenFromCookie(request);
+
+            if (refreshToken == null) {
+                throw new RuntimeException("Refresh token not found in cookies");
+            }
+
+            Map<String, Object> authResult = authService.refreshToken(refreshToken);
             log.info("Token refreshed successfully");
-            return ResponseEntity.ok(response);
+
+            // Create new secure HttpOnly cookie with new refresh token
+            ResponseCookie refreshTokenCookie = createRefreshTokenCookie((String) authResult.get("refreshToken"));
+
+            // Return only access token in response body
+            AuthResponse response = (AuthResponse) authResult.get("authResponse");
+
+            return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
+                .body(response);
         } catch (Exception e) {
             log.error("Token refresh failed: {}", e.getMessage());
+            throw e;
+        }
+    }
+
+    @PostMapping("/logout")
+    @Operation(summary = "User logout",
+               description = "Automatically logs out user from Keycloak by invalidating all sessions and clearing cookies")
+    @SecurityRequirement(name = "Bearer Authentication")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "User logged out successfully"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized - invalid or missing token"),
+        @ApiResponse(responseCode = "500", description = "Logout service error")
+    })
+    public ResponseEntity<Map<String, String>> logout(Authentication authentication) {
+        String userId = extractUserIdFromToken(authentication);
+        log.info("Logout request for user ID: {}", userId);
+
+        try {
+            // Automatically logout user from Keycloak (invalidate all sessions)
+            authService.logoutUser(userId);
+
+            // Clear refresh token cookie
+            ResponseCookie clearRefreshTokenCookie = ResponseCookie.from(cookieConfig.getRefreshTokenName(), "")
+                .httpOnly(cookieConfig.isHttpOnly())
+                .secure(cookieConfig.isSecure())
+                .sameSite(cookieConfig.getSameSite())
+                .path(cookieConfig.getPath())
+                .maxAge(0)
+                .build();
+
+            Map<String, String> response = Map.of(
+                "status", "success",
+                "message", "User logged out successfully from all sessions"
+            );
+
+            return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, clearRefreshTokenCookie.toString())
+                .body(response);
+
+        } catch (Exception e) {
+            log.error("Logout failed for user {}: {}", userId, e.getMessage());
             throw e;
         }
     }
@@ -142,9 +225,7 @@ public class AuthController {
         @ApiResponse(responseCode = "400", description = "Invalid input data"),
         @ApiResponse(responseCode = "404", description = "User not found")
     })
-    public ResponseEntity<Void> updateProfile(
-            Authentication authentication,
-            @Valid @RequestBody UserProfileResponse updateRequest) {
+    public ResponseEntity<Void> updateProfile(Authentication authentication, @Valid @RequestBody UserProfileResponse updateRequest) {
         
         String userId = extractUserIdFromToken(authentication);
         log.info("Profile update request for user ID: {}", userId);
@@ -159,37 +240,25 @@ public class AuthController {
         }
     }
 
-    @PostMapping("/logout")
-    @Operation(summary = "User logout", 
-               description = "Provides logout URL for proper Keycloak session termination")
-    @SecurityRequirement(name = "Bearer Authentication")
-    @ApiResponse(responseCode = "200", description = "Logout URL provided")
-    public ResponseEntity<Map<String, String>> logout(Authentication authentication) {
-        String userId = extractUserIdFromToken(authentication);
-        log.info("Logout request for user ID: {}", userId);
-        
-        // Return Keycloak logout URL for proper session termination
-        Map<String, String> response = Map.of(
-            "logoutUrl", logoutUrl,
-            "message", "Please redirect to logoutUrl to complete logout process"
-        );
-        
-        return ResponseEntity.ok(response);
-    }
-
     @GetMapping("/login-urls")
     @Operation(summary = "Get authentication URLs", 
                description = "Returns Keycloak authentication URLs for different login methods")
     @ApiResponse(responseCode = "200", description = "Authentication URLs retrieved successfully")
-    public ResponseEntity<Map<String, String>> getLoginUrls() {
-        log.info("Login URLs request");
-        
-        Map<String, String> urls = Map.of(
-            "regularLogin", loginUrl,
-            "googleLogin", googleLoginUrl,
-            "logoutUrl", logoutUrl
-        );
-        
+    public ResponseEntity<Map<String, String>> getLoginUrls(@RequestParam("userRole") String userRole) {
+
+        log.info("Login URLs requested for role: {}", userRole);
+
+        Map<String, String> urls = new HashMap<>();
+        urls.put("regularLogin", loginUrl);
+        urls.put("logoutUrl", logoutUrl);
+
+        // Role-based customization
+        if ("admin".equalsIgnoreCase(userRole)) {
+            urls.put("googleLogin", adminGoogleLoginUrl);
+        } else {
+            urls.put("googleLogin", googleLoginUrl);
+        }
+
         return ResponseEntity.ok(urls);
     }
 
@@ -206,31 +275,22 @@ public class AuthController {
         log.info("OAuth callback request with code: {}", request.getCode().substring(0, 10) + "...");
         
         try {
-            AuthResponse response = keycloakCallbackService.handleAuthCallback(request);
+            Map<String, Object> authResult = keycloakCallbackService.handleAuthCallback(request);
             log.info("OAuth callback processed successfully");
-            return ResponseEntity.ok(response);
+
+            // Create secure HttpOnly cookie for refresh token
+            ResponseCookie refreshTokenCookie = createRefreshTokenCookie((String) authResult.get("refreshToken"));
+
+            // Return only access token in response body
+            AuthResponse response = (AuthResponse) authResult.get("authResponse");
+
+            return ResponseEntity.ok()
+                .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
+                .body(response);
         } catch (Exception e) {
             log.error("OAuth callback failed: {}", e.getMessage());
             throw e;
         }
-    }
-
-    @GetMapping("/callback")
-    @Operation(summary = "OAuth callback redirect", 
-               description = "Handles OAuth callback redirect from Keycloak (GET method)")
-    public ResponseEntity<Map<String, String>> handleOAuthCallbackRedirect(
-            @RequestParam String code,
-            @RequestParam(required = false) String state) {
-
-        log.info("OAuth callback redirect with code: {}", code.substring(0, 10) + "...");
-        
-        Map<String, String> response = Map.of(
-            "code", code,
-            "state", state != null ? state : "",
-            "message", "Authorization code received. Use POST /api/auth/callback to complete authentication."
-        );
-        
-        return ResponseEntity.ok(response);
     }
 
     @PostMapping("/change-password")
@@ -243,9 +303,7 @@ public class AuthController {
         @ApiResponse(responseCode = "401", description = "Unauthorized - invalid or missing token"),
         @ApiResponse(responseCode = "403", description = "Current password incorrect")
     })
-    public ResponseEntity<String> changePassword(
-            Authentication authentication,
-            @Valid @RequestBody ChangePasswordWithOldPasswordRequest request) {
+    public ResponseEntity<String> changePassword(Authentication authentication, @Valid @RequestBody ChangePasswordWithOldPasswordRequest request) {
         
         String userId = extractUserIdFromToken(authentication);
         log.info("Password change request for user ID: {}", userId);
@@ -332,11 +390,38 @@ public class AuthController {
         return ResponseEntity.ok(health);
     }
 
-    // Helper method to extract user ID from JWT token
-    private String extractUserIdFromToken(Authentication authentication) {
-        if (authentication.getPrincipal() instanceof Jwt jwt) {
-            return jwt.getClaimAsString("sub");
+    /**
+     * Creates a secure HttpOnly cookie for the refresh token
+     */
+    private ResponseCookie createRefreshTokenCookie(String refreshToken) {
+        return ResponseCookie.from(cookieConfig.getRefreshTokenName(), refreshToken)
+            .httpOnly(cookieConfig.isHttpOnly())
+            .secure(cookieConfig.isSecure())
+            .sameSite(cookieConfig.getSameSite())
+            .path(cookieConfig.getPath())
+            .maxAge(Duration.ofDays(cookieConfig.getRefreshTokenMaxAgeDays()))
+            .build();
+    }
+
+    /**
+     * Extracts refresh token from HttpOnly cookie
+     */
+    private String extractRefreshTokenFromCookie(HttpServletRequest request) {
+        if (request.getCookies() != null) {
+            for (Cookie cookie : request.getCookies()) {
+                if (cookieConfig.getRefreshTokenName().equals(cookie.getName())) {
+                    return cookie.getValue();
+                }
+            }
         }
-        throw new RuntimeException("Invalid token format");
+        return null;
+    }
+
+    /**
+     * Extracts user ID from JWT token
+     */
+    private String extractUserIdFromToken(Authentication authentication) {
+        Jwt jwt = (Jwt) authentication.getPrincipal();
+        return jwt.getClaimAsString("sub");
     }
 }

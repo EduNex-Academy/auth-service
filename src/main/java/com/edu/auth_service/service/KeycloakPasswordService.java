@@ -146,7 +146,7 @@ public class KeycloakPasswordService {
     }
 
     /**
-     * Verify current password with Keycloak by attempting authentication
+     * Verify the current password with Keycloak by attempting authentication
      */
     private boolean verifyCurrentPasswordWithKeycloak(String username, String currentPassword) {
         try {
