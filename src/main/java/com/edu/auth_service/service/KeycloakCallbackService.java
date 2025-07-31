@@ -3,12 +3,14 @@ package com.edu.auth_service.service;
 import com.edu.auth_service.dto.AuthCallbackRequest;
 import com.edu.auth_service.dto.AuthResponse;
 import com.edu.auth_service.dto.UserProfileResponse;
+import com.edu.auth_service.util.KeycloakUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
 import org.keycloak.admin.client.resource.RealmResource;
 import org.keycloak.admin.client.resource.UserResource;
 import org.keycloak.representations.idm.RoleRepresentation;
+import org.keycloak.representations.idm.UserRepresentation;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -18,6 +20,9 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -65,7 +70,7 @@ public class KeycloakCallbackService {
             Map<String, Object> userInfo = getUserInfoFromToken(accessToken);
 
             // Assign a role to user
-            assignDefaultRoleToUser((String) userInfo.get("sub"), request.getUserRole());
+            assignRoleToUser((String) userInfo.get("sub"), request.getUserRole());
 
             // Create user profile response from Keycloak data
             UserProfileResponse userProfile = createUserProfileFromKeycloakInfo(userInfo);
@@ -159,22 +164,25 @@ public class KeycloakCallbackService {
     }
 
     private UserProfileResponse createUserProfileFromKeycloakInfo(Map<String, Object> userInfo) {
-        UserProfileResponse profile = new UserProfileResponse();
-        
-        profile.setId((String) userInfo.get("sub"));
-        profile.setUsername((String) userInfo.get("preferred_username"));
-        profile.setEmail((String) userInfo.get("email"));
-        profile.setFirstName((String) userInfo.get("given_name"));
-        profile.setLastName((String) userInfo.get("family_name"));
-        
-        // Set default values
-        profile.setIsActive(true);
-        profile.setRole("USER"); // Default role can be enhanced to read from Keycloak roles
-        
-        return profile;
+        try {
+            // Get the user ID from userInfo
+            String userId = (String) userInfo.get("sub");
+
+            // Fetch complete user representation from Keycloak Admin API
+            RealmResource realmResource = keycloak.realm(realm);
+            UserResource userResource = realmResource.users().get(userId);
+            UserRepresentation user = userResource.toRepresentation();
+
+            // Use the shared mapper utility
+            return KeycloakUserMapper.mapKeycloakUserToProfile(user, keycloak, realm);
+
+        } catch (Exception e) {
+            log.error("Error creating user profile from Keycloak info: {}", e.getMessage());
+            throw new RuntimeException("Failed to get complete user profile: " + e.getMessage());
+        }
     }
 
-    private void assignDefaultRoleToUser(String userId, String userRole) {
+    private void assignRoleToUser(String userId, String userRole) {
         try {
             RealmResource realmResource = keycloak.realm(realm);
             UserResource userResource = realmResource.users().get(userId);

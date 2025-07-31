@@ -17,7 +17,7 @@ public class CookieConfig {
     /**
      * Maximum age of refresh token cookie in days
      */
-    private int refreshTokenMaxAgeDays = 30;
+    private int refreshTokenMaxAgeDays = 1;
 
     /**
      * Whether cookies should be secure (HTTPS only)

@@ -33,7 +33,7 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authz -> authz
                 // Public endpoints
-                .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh").permitAll()
+                .requestMatchers("/api/auth/register", "/api/auth/login", "/api/auth/refresh", "/api/auth/send-password-reset").permitAll()
                 .requestMatchers("/api/auth/callback", "/api/auth/login-urls").permitAll()
                 .requestMatchers("/api/auth/diagnose", "api/auth/health").permitAll()
                 .requestMatchers("/actuator/**").permitAll()

@@ -1,6 +1,7 @@
 package com.edu.auth_service.service;
 
 import com.edu.auth_service.dto.*;
+import com.edu.auth_service.util.KeycloakUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
@@ -20,6 +21,10 @@ import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 
 import jakarta.ws.rs.core.Response;
+
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.*;
 
 @Service
@@ -109,7 +114,7 @@ public class AuthService {
                 // Get user profile from Keycloak
                 UserProfileResponse userProfile = getUserProfileFromKeycloak(username);
 
-                // Create AuthResponse without refresh token for response body
+                // Create AuthResponse without a refresh token for response body
                 AuthResponse authResponse = new AuthResponse(
                     (String) response.get("access_token"),
                     "Bearer",
@@ -119,7 +124,7 @@ public class AuthService {
 
                 // Return both refresh token and auth response
                 Map<String, Object> result = new HashMap<>();
-                result.put("refreshToken", (String) response.get("refresh_token"));
+                result.put("refreshToken", response.get("refresh_token"));
                 result.put("authResponse", authResponse);
 
                 return result;
@@ -159,7 +164,7 @@ public class AuthService {
             if (response != null && response.containsKey("access_token")) {
                 log.info("Token refreshed successfully");
                 
-                // Create AuthResponse without refresh token for response body
+                // Create AuthResponse without a refresh token for response body
                 AuthResponse authResponse = new AuthResponse(
                     (String) response.get("access_token"),
                     "Bearer",
@@ -169,7 +174,7 @@ public class AuthService {
 
                 // Return both refresh token and auth response
                 Map<String, Object> result = new HashMap<>();
-                result.put("refreshToken", (String) response.get("refresh_token"));
+                result.put("refreshToken", response.get("refresh_token"));
                 result.put("authResponse", authResponse);
 
                 return result;
@@ -328,7 +333,7 @@ public class AuthService {
             user.setFirstName(request.getFirstName());
             user.setLastName(request.getLastName());
             user.setEnabled(true);
-            user.setEmailVerified(true);
+            user.setEmailVerified(false);
 
             // Set custom attributes
             Map<String, List<String>> attributes = new HashMap<>();
@@ -416,31 +421,7 @@ public class AuthService {
     }
 
     private UserProfileResponse mapKeycloakUserToProfile(UserRepresentation user) {
-        UserProfileResponse response = new UserProfileResponse();
-        response.setId(user.getId());
-        response.setUsername(user.getUsername());
-        response.setEmail(user.getEmail());
-        response.setFirstName(user.getFirstName());
-        response.setLastName(user.getLastName());
-
-        // Get custom attributes
-        Map<String, List<String>> attributes = user.getAttributes();
-        if (attributes != null) {
-            if (attributes.containsKey("phoneNumber")) {
-                response.setPhoneNumber(attributes.get("phoneNumber").get(0));
-            }
-            if (attributes.containsKey("profilePictureUrl")) {
-                response.setProfilePictureUrl(attributes.get("profilePictureUrl").get(0));
-            }
-        }
-
-        // Get user roles
-        // Note: This would require additional call to get user roles
-        // For simplicity, we'll set a default role here
-        response.setRole("USER");
-        response.setIsActive(user.isEnabled());
-
-        return response;
+        return KeycloakUserMapper.mapKeycloakUserToProfile(user, keycloakAdminClient, realm);
     }
 
     /**

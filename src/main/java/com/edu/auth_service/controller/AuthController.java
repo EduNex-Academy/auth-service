@@ -277,13 +277,13 @@ public class AuthController {
         try {
             Map<String, Object> authResult = keycloakCallbackService.handleAuthCallback(request);
             log.info("OAuth callback processed successfully");
-
+            
             // Create secure HttpOnly cookie for refresh token
             ResponseCookie refreshTokenCookie = createRefreshTokenCookie((String) authResult.get("refreshToken"));
-
+            
             // Return only access token in response body
             AuthResponse response = (AuthResponse) authResult.get("authResponse");
-
+            
             return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, refreshTokenCookie.toString())
                 .body(response);

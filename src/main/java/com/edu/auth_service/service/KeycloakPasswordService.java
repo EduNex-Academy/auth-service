@@ -38,6 +38,8 @@ public class KeycloakPasswordService {
     private String keycloakClientSecret;
     @Value("${app.keycloak.password-reset-redirect-uri}")
     private String passwordResetRedirectUri;
+    @Value("${app.keycloak.admin-password-reset-redirect-uri}")
+    private String passwordResetAdminRedirectUri;
 
     /**
      * Trigger Keycloak's built-in forgot password email
@@ -71,18 +73,18 @@ public class KeycloakPasswordService {
             }
 
             // Construct redirect URI
-            String redirectUri = passwordResetRedirectUri;
+            String redirectUri = "ADMIN".equalsIgnoreCase(request.getUserRole()) ? passwordResetAdminRedirectUri : passwordResetRedirectUri;
             if (!redirectUri.endsWith("/")) {
                 redirectUri += "/";
             }
             redirectUri += keycloakUser.getId();
 
-            // Trigger forgot password email - Keycloak will send email with reset link
+            // Trigger forgot password email - Keycloak will send email with a reset link
             userResource.executeActionsEmail(
                     keycloakClientId, // clientId
                     redirectUri, // redirectUri
                     300, // lifespan in seconds (5 minutes)
-                    Arrays.asList("UPDATE_PASSWORD") // actions
+                    List.of("UPDATE_PASSWORD") // actions
             );
             log.info("Password reset email sent successfully to: {}", email);
         } catch (Exception e) {
