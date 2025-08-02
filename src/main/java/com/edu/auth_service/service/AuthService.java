@@ -19,12 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
-
 import jakarta.ws.rs.core.Response;
-
-import java.time.Instant;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.*;
 
 @Service
@@ -164,12 +159,15 @@ public class AuthService {
             if (response != null && response.containsKey("access_token")) {
                 log.info("Token refreshed successfully");
                 
-                // Create AuthResponse without a refresh token for response body
+                // Get user profile from the new access token
+                UserProfileResponse userProfile = getUserProfileFromAccessToken((String) response.get("access_token"));
+
+                // Create AuthResponse with user profile
                 AuthResponse authResponse = new AuthResponse(
                     (String) response.get("access_token"),
                     "Bearer",
                     ((Number) response.get("expires_in")).longValue(),
-                    null // No user profile needed for token refresh
+                    userProfile
                 );
 
                 // Return both refresh token and auth response
@@ -417,6 +415,41 @@ public class AuthService {
         } catch (Exception e) {
             log.error("Error getting user profile from Keycloak for username {}: {}", username, e.getMessage());
             throw new RuntimeException("Failed to get user profile: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Get user profile from access token by calling Keycloak userinfo endpoint
+     */
+    @SuppressWarnings("unchecked")
+    private UserProfileResponse getUserProfileFromAccessToken(String accessToken) {
+        try {
+            log.debug("Getting user profile from access token");
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(accessToken);
+
+            HttpEntity<Void> request = new HttpEntity<>(headers);
+
+            String userInfoUrl = serverUrl + "/realms/" + realm + "/protocol/openid-connect/userinfo";
+            Map<String, Object> userInfo = restTemplate.postForObject(userInfoUrl, request, Map.class);
+
+            if (userInfo != null) {
+                // Get the user ID from userInfo and fetch complete user data
+                String userId = (String) userInfo.get("sub");
+
+                RealmResource realmResource = keycloakAdminClient.realm(realm);
+                UserResource userResource = realmResource.users().get(userId);
+                UserRepresentation user = userResource.toRepresentation();
+
+                return mapKeycloakUserToProfile(user);
+            } else {
+                throw new RuntimeException("Failed to get user info from access token");
+            }
+
+        } catch (Exception e) {
+            log.error("Error getting user profile from access token: {}", e.getMessage());
+            throw new RuntimeException("Failed to get user profile from access token: " + e.getMessage());
         }
     }
 
