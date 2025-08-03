@@ -38,32 +38,6 @@ services:
       - start-dev
     networks:
       - edunex-platform-network
-
-#  auth-service:
-#    build: .
-#    container_name: auth-service
-#    environment:
-#      SERVER_PORT: 8081
-#      KEYCLOAK_SERVER_URL: http://keycloak:8080
-#      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-edunex-realm}
-#      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-auth-service}
-#      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-your-client-secret}
-#      KEYCLOAK_REDIRECT_URI: ${KEYCLOAK_REDIRECT_URI:-http://localhost:3000/auth/callback}
-#      LOG_LEVEL_SECURITY: INFO
-#      LOG_LEVEL_KEYCLOAK: INFO
-#      LOG_LEVEL_SPRING: INFO
-#    ports:
-#      - "8081:8081"
-#    depends_on:
-#      - keycloak
-#    networks:
-#      - edunex-platform-network
-#    healthcheck:
-#      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
-#      interval: 30s
-#      timeout: 10s
-#      retries: 3
-
 volumes:
   keycloak_postgres_data:
 
