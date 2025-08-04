@@ -38,6 +38,23 @@ services:
       - start-dev
     networks:
       - edunex-platform-network
+
+  # Auth Service
+  auth-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: auth-service
+    env_file:
+      - docker.env
+    ports:
+      - "8081:8081"
+    depends_on:
+      - keycloak
+    networks:
+      - edunex-platform-network
+    restart: unless-stopped
+
 volumes:
   keycloak_postgres_data:
 

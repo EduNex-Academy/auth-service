@@ -4,10 +4,10 @@ WORKDIR /app
 COPY build.gradle settings.gradle ./
 COPY gradle gradle
 COPY src src
-RUN gradle build --no-daemon
+RUN gradle build -x test --no-daemon
 
 # Runtime stage
-FROM openjdk:17-jre-slim
+FROM eclipse-temurin:17-jre
 WORKDIR /app
 
 # Install curl for health checks

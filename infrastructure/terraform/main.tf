@@ -38,11 +38,8 @@ resource "azurerm_kubernetes_cluster" "aks" {
     node_count          = var.node_count
     vm_size             = var.vm_size
     type                = "VirtualMachineScaleSets"
-    # Removed zones for East Asia region compatibility
     enable_auto_scaling = false
     temporary_name_for_rotation = "systemtemp"
-
-    # System node pool should only run system pods
     only_critical_addons_enabled = true
   }
 
@@ -57,18 +54,15 @@ resource "azurerm_kubernetes_cluster" "aks" {
     service_cidr      = "10.2.0.0/24"
   }
 
-  # Enable monitoring
   oms_agent {
     log_analytics_workspace_id = azurerm_log_analytics_workspace.aks.id
   }
 
   tags = {
     Environment = var.environment
-    Purpose     = "Keycloak-AKS"
   }
 }
 
-# Log Analytics Workspace for monitoring
 resource "azurerm_log_analytics_workspace" "aks" {
   name                = "${var.cluster_name}-logs"
   location            = azurerm_resource_group.rg.location
@@ -82,14 +76,12 @@ resource "azurerm_log_analytics_workspace" "aks" {
   }
 }
 
-# User node pool for application workloads
 resource "azurerm_kubernetes_cluster_node_pool" "user_pool" {
   name                  = "user"
   kubernetes_cluster_id = azurerm_kubernetes_cluster.aks.id
   vm_size               = var.vm_size
   node_count            = 1
   enable_auto_scaling   = false
-  # Removed min_count and max_count since auto-scaling is disabled
   mode                 = "User"
 
   node_labels = {
@@ -103,7 +95,6 @@ resource "azurerm_kubernetes_cluster_node_pool" "user_pool" {
   }
 }
 
-# Azure Container Registry for storing container images
 resource "azurerm_container_registry" "acr" {
   name                = "${replace(var.cluster_name, "-", "")}acr"
   resource_group_name = azurerm_resource_group.rg.name
@@ -115,12 +106,4 @@ resource "azurerm_container_registry" "acr" {
     Environment = var.environment
     Purpose     = "Container-Registry"
   }
-}
-
-# Grant AKS access to ACR
-resource "azurerm_role_assignment" "aks_acr_pull" {
-  principal_id                     = azurerm_kubernetes_cluster.aks.kubelet_identity[0].object_id
-  role_definition_name             = "AcrPull"
-  scope                           = azurerm_container_registry.acr.id
-  skip_service_principal_aad_check = true
 }

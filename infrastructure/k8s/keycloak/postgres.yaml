@@ -48,28 +48,12 @@ spec:
               name: postgres-secret
               key: postgres-password
         - name: PGDATA
-          value: /var/lib/postgresql/data/pgdata  # Specific subdirectory for PostgreSQL
+          value: /var/lib/postgresql/data/pgdata
         ports:
         - containerPort: 5432
         volumeMounts:
         - name: postgres-storage
           mountPath: /var/lib/postgresql/data
-        readinessProbe:
-          exec:
-            command:
-              - /bin/sh
-              - -c
-              - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
-          initialDelaySeconds: 30
-          periodSeconds: 10
-        livenessProbe:
-          exec:
-            command:
-              - /bin/sh
-              - -c
-              - pg_isready -U $POSTGRES_USER -d $POSTGRES_DB
-          initialDelaySeconds: 60
-          periodSeconds: 30
         resources:
           requests:
             memory: "128Mi"  # Reduced from 256Mi
@@ -94,3 +78,4 @@ spec:
   - port: 5432
     targetPort: 5432
   type: ClusterIP
+

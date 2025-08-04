@@ -5,3 +5,4 @@ node_count           = 1
 vm_size              = "Standard_B2s"
 kubernetes_version   = "1.32.6"
 environment          = "dev"
+
