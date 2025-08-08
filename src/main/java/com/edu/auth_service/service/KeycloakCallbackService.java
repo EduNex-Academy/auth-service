@@ -44,11 +44,14 @@ public class KeycloakCallbackService {
     @Value("${keycloak.server-url}")
     private String serverUrl;
 
-    @Value("${KEYCLOAK_REDIRECT_URI}")
-    private String redirectUri;
+    @Value("${KEYCLOAK_STUDENT_REDIRECT_URI}")
+    private String studentRedirectUri;
 
     @Value("${KEYCLOAK_ADMIN_REDIRECT_URI}")
     private String adminRedirectUri;
+
+    @Value("${KEYCLOAK_INSTRUCTOR_REDIRECT_URI}")
+    private String instructorRedirectUri;
 
     public Map<String, Object> handleAuthCallback(AuthCallbackRequest request) {
         try {
@@ -96,8 +99,9 @@ public class KeycloakCallbackService {
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> exchangeCodeForTokens(String code, String userRole) {
+        String effectiveRedirectUri = "ADMIN".equalsIgnoreCase(userRole) ? adminRedirectUri :
+                "INSTRUCTOR".equalsIgnoreCase(userRole) ? instructorRedirectUri : studentRedirectUri;
         try {
-            String effectiveRedirectUri = "ADMIN".equalsIgnoreCase(userRole) ? adminRedirectUri : redirectUri;
             log.debug("Exchanging authorization code for tokens using redirect_uri: {}", effectiveRedirectUri);
 
             MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
@@ -127,7 +131,6 @@ public class KeycloakCallbackService {
             }
 
         } catch (Exception e) {
-            String effectiveRedirectUri = "ADMIN".equalsIgnoreCase(userRole) ? adminRedirectUri : redirectUri;
             log.error("Token exchange failed for redirect_uri: {}. Error: {}", effectiveRedirectUri, e.getMessage());
             log.error("Please ensure the redirect_uri matches exactly what's configured in Keycloak client settings");
             throw new RuntimeException("Token exchange failed: " + e.getMessage());

@@ -42,17 +42,14 @@ public class AuthController {
     private final KeycloakPasswordService keycloakPasswordService;
     private final CookieConfig cookieConfig;
 
-    @Value("${app.keycloak.google-login-url}")
-    private String googleLoginUrl;
-
     @Value("${app.keycloak.admin-google-login-url}")
     private String adminGoogleLoginUrl;
 
-    @Value("${app.keycloak.login-url}")
-    private String loginUrl;
+    @Value("${app.keycloak.student-google-login-url}")
+    private String studentGoogleLoginUrl;
 
-    @Value("${app.keycloak.logout-url}")
-    private String logoutUrl;
+    @Value("${app.keycloak.instructor-google-login-url}")
+    private String instructorGoogleLoginUrl;
 
     @PostMapping("/register")
     @Operation(summary = "Register new user", 
@@ -249,16 +246,20 @@ public class AuthController {
         log.info("Login URLs requested for role: {}", userRole);
 
         Map<String, String> urls = new HashMap<>();
-        urls.put("regularLogin", loginUrl);
-        urls.put("logoutUrl", logoutUrl);
-
-        // Role-based customization
-        if ("admin".equalsIgnoreCase(userRole)) {
-            urls.put("googleLogin", adminGoogleLoginUrl);
-        } else {
-            urls.put("googleLogin", googleLoginUrl);
+        switch (userRole.toLowerCase()) {
+            case "admin":
+                urls.put("googleLogin", adminGoogleLoginUrl);
+                break;
+            case "student":
+                urls.put("googleLogin", studentGoogleLoginUrl);
+                break;
+            case "instructor":
+                urls.put("googleLogin", instructorGoogleLoginUrl);
+                break;
+            default:
+                urls.put("error", "Unsupported user role");
+                break;
         }
-
         return ResponseEntity.ok(urls);
     }
 

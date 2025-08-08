@@ -29,5 +29,5 @@ public class UserRegistrationRequest {
     private String phoneNumber;
 
     @NotBlank(message = "Role is required")
-    private String role; // STUDENT, INSTRUCTOR
+    private String role; // STUDENT, INSTRUCTOR, ADMIN
 }

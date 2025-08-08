@@ -55,7 +55,7 @@ public class AuthService {
 
             // Check if user already exists
             if (userExists(request.getUsername(), request.getEmail())) {
-                throw new RuntimeException("User already exists");
+                throw new RuntimeException("User/Email already exists");
             }
 
             // Create user in Keycloak

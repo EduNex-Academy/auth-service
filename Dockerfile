@@ -20,7 +20,7 @@ COPY --from=build /app/build/libs/*.jar app.jar
 EXPOSE 8081
 
 # Health check endpoint
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=300s --timeout=10s --start-period=5s --retries=3 \
   CMD curl -f http://localhost:8081/actuator/health || exit 1
 
 # Run the application

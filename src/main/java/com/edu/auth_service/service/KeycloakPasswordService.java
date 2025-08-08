@@ -18,7 +18,7 @@ import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.stereotype.Service;
-import java.util.Arrays;
+
 import java.util.List;
 
 @Service
@@ -36,10 +36,12 @@ public class KeycloakPasswordService {
     private String keycloakClientId;
     @Value("${keycloak.client-secret}")
     private String keycloakClientSecret;
-    @Value("${app.keycloak.password-reset-redirect-uri}")
-    private String passwordResetRedirectUri;
+    @Value("${app.keycloak.student-password-reset-redirect-uri}")
+    private String studentPasswordResetRedirectUri;
     @Value("${app.keycloak.admin-password-reset-redirect-uri}")
-    private String passwordResetAdminRedirectUri;
+    private String adminPasswordResetRedirectUri;
+    @Value("${app.keycloak.instructor-password-reset-redirect-uri}")
+    private String instructorPasswordResetRedirectUri;
 
     /**
      * Trigger Keycloak's built-in forgot password email
@@ -73,7 +75,12 @@ public class KeycloakPasswordService {
             }
 
             // Construct redirect URI
-            String redirectUri = "ADMIN".equalsIgnoreCase(request.getUserRole()) ? passwordResetAdminRedirectUri : passwordResetRedirectUri;
+            String redirectUri = switch (request.getUserRole()) {
+                case "STUDENT" -> studentPasswordResetRedirectUri;
+                case "ADMIN" -> adminPasswordResetRedirectUri;
+                case "INSTRUCTOR" -> instructorPasswordResetRedirectUri;
+                default -> throw new RuntimeException("Unsupported user type: " + keycloakUser.getAttributes().get("userType").get(0));
+            };
             if (!redirectUri.endsWith("/")) {
                 redirectUri += "/";
             }
