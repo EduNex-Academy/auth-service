@@ -206,9 +206,9 @@ public class AuthService {
     }
 
     /**
-     * Update user profile in Keycloak
+     * Update user profile with ProfileUpdateRequest
      */
-    public void updateUserProfile(String userId, UserProfileResponse updateRequest) {
+    public void updateUserProfile(String userId, ProfileUpdateRequest updateRequest) {
         try {
             log.info("Updating user profile for ID: {}", userId);
 
@@ -216,15 +216,12 @@ public class AuthService {
             UserResource userResource = realmResource.users().get(userId);
             UserRepresentation user = userResource.toRepresentation();
 
-            // Update allowed fields
-            if (updateRequest.getFirstName() != null) {
-                user.setFirstName(updateRequest.getFirstName());
+            // Update basic fields
+            if (updateRequest.getFirstName() != null && !updateRequest.getFirstName().trim().isEmpty()) {
+                user.setFirstName(updateRequest.getFirstName().trim());
             }
-            if (updateRequest.getLastName() != null) {
-                user.setLastName(updateRequest.getLastName());
-            }
-            if (updateRequest.getEmail() != null) {
-                user.setEmail(updateRequest.getEmail());
+            if (updateRequest.getLastName() != null && !updateRequest.getLastName().trim().isEmpty()) {
+                user.setLastName(updateRequest.getLastName().trim());
             }
 
             // Update custom attributes
@@ -234,10 +231,39 @@ public class AuthService {
             }
             
             if (updateRequest.getPhoneNumber() != null) {
-                attributes.put("phoneNumber", List.of(updateRequest.getPhoneNumber()));
+                if (updateRequest.getPhoneNumber().trim().isEmpty()) {
+                    attributes.remove("phoneNumber");
+                } else {
+                    attributes.put("phoneNumber", List.of(updateRequest.getPhoneNumber().trim()));
+                }
             }
+            
+            if (updateRequest.getBio() != null) {
+                if (updateRequest.getBio().trim().isEmpty()) {
+                    attributes.remove("bio");
+                } else {
+                    attributes.put("bio", List.of(updateRequest.getBio().trim()));
+                }
+            }
+            
+            if (updateRequest.getLocation() != null) {
+                if (updateRequest.getLocation().trim().isEmpty()) {
+                    attributes.remove("location");
+                } else {
+                    attributes.put("location", List.of(updateRequest.getLocation().trim()));
+                }
+            }
+            
+            if (updateRequest.getDateOfBirth() != null) {
+                attributes.put("dateOfBirth", List.of(updateRequest.getDateOfBirth().toString()));
+            }
+            
             if (updateRequest.getProfilePictureUrl() != null) {
-                attributes.put("profilePictureUrl", List.of(updateRequest.getProfilePictureUrl()));
+                if (updateRequest.getProfilePictureUrl().trim().isEmpty()) {
+                    attributes.remove("profilePictureUrl");
+                } else {
+                    attributes.put("profilePictureUrl", List.of(updateRequest.getProfilePictureUrl().trim()));
+                }
             }
 
             user.setAttributes(attributes);

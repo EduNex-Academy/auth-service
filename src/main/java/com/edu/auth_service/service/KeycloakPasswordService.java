@@ -42,6 +42,12 @@ public class KeycloakPasswordService {
     private String adminPasswordResetRedirectUri;
     @Value("${app.keycloak.instructor-password-reset-redirect-uri}")
     private String instructorPasswordResetRedirectUri;
+    @Value("${app.keycloak.student-email-verification-redirect-uri}")
+    private String studentEmailVerificationRedirectUri;
+    @Value("${app.keycloak.admin-email-verification-redirect-uri}")
+    private String adminEmailVerificationRedirectUri;
+    @Value("${app.keycloak.instructor-email-verification-redirect-uri}")
+    private String instructorEmailVerificationRedirectUri;
 
     /**
      * Trigger Keycloak's built-in forgot password email
@@ -205,5 +211,67 @@ public class KeycloakPasswordService {
             log.error("Failed to update user status for {}: ", userId, e);
             throw new RuntimeException("Failed to update user status: " + e.getMessage());
         }
+    }
+
+    /**
+     * Send email verification to user
+     * Uses Keycloak's built-in email verification functionality
+     */
+    public void sendEmailVerification(String userId) {
+        try {
+            log.info("Attempting to send email verification for user ID: {}", userId);
+
+            UserResource userResource = keycloak.realm(realm).users().get(userId);
+            UserRepresentation user = userResource.toRepresentation();
+
+            if (user == null) {
+                throw new RuntimeException("User not found with ID: " + userId);
+            }
+
+            if (user.getEmail() == null || user.getEmail().isEmpty()) {
+                throw new RuntimeException("User does not have an email address");
+            }
+
+            // Check if email is already verified
+            if (Boolean.TRUE.equals(user.isEmailVerified())) {
+                log.info("Email already verified for user: {}", userId);
+                throw new RuntimeException("Email is already verified");
+            }
+
+            // Get user role to determine redirect URI
+            String redirectUri = getEmailVerificationRedirectUri(user);
+
+            // Send verification email using Keycloak's executeActionsEmail
+            userResource.executeActionsEmail(
+                    keycloakClientId, // clientId
+                    redirectUri, // redirectUri
+                    300, // lifespan in seconds (5 minutes)
+                    List.of("VERIFY_EMAIL") // actions
+            );
+
+            log.info("Email verification sent successfully for user: {}", userId);
+        } catch (Exception e) {
+            log.error("Failed to send email verification for user {}: ", userId, e);
+            throw new RuntimeException("Failed to send email verification: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Get email verification redirect URI based on user role
+     */
+    private String getEmailVerificationRedirectUri(UserRepresentation user) {
+        // Check user attributes for role
+        if (user.getAttributes() != null && user.getAttributes().get("userType") != null) {
+            String userType = user.getAttributes().get("userType").get(0);
+            return switch (userType) {
+                case "STUDENT" -> studentEmailVerificationRedirectUri;
+                case "ADMIN" -> adminEmailVerificationRedirectUri;
+                case "INSTRUCTOR" -> instructorEmailVerificationRedirectUri;
+                default -> studentEmailVerificationRedirectUri; // default fallback
+            };
+        }
+        
+        // Fallback to student redirect URI if no role found
+        return studentEmailVerificationRedirectUri;
     }
 }

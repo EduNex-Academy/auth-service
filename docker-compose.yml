@@ -27,7 +27,6 @@ services:
       KC_DB_PASSWORD: keycloak
       KEYCLOAK_ADMIN: admin
       KEYCLOAK_ADMIN_PASSWORD: admin
-      KC_HOSTNAME_URL: http://localhost:8080
       KC_HOSTNAME_STRICT: false
       KC_HOSTNAME_STRICT_HTTPS: false
       KC_HTTP_ENABLED: true
@@ -37,24 +36,11 @@ services:
       - postgres-keycloak
     command:
       - start-dev
+      - --import-realm
+    volumes:
+      - ./keycloak-export:/opt/keycloak/data/import
     networks:
       - edunex-platform-network
-
-  # Auth Service
-  auth-service:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: auth-service
-    env_file:
-      - docker.env
-    ports:
-      - "8081:8081"
-    depends_on:
-      - keycloak
-    networks:
-      - edunex-platform-network
-    restart: unless-stopped
 
 volumes:
   keycloak_postgres_data:

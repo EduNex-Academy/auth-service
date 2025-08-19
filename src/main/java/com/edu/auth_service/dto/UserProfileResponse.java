@@ -32,6 +32,14 @@ public class UserProfileResponse {
     
     private String profilePictureUrl;
     
+    @Size(max = 500, message = "Bio must not exceed 500 characters")
+    private String bio;
+    
+    @Size(max = 100, message = "Location must not exceed 100 characters")
+    private String location;
+    
+    private String dateOfBirth; // Stored as string for flexibility
+    
     @NotBlank(message = "Role is required")
     private String role;
     

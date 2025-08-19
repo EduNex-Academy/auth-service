@@ -40,6 +40,15 @@ public class KeycloakUserMapper {
             if (attributes.containsKey("profilePictureUrl")) {
                 response.setProfilePictureUrl(attributes.get("profilePictureUrl").get(0));
             }
+            if (attributes.containsKey("bio")) {
+                response.setBio(attributes.get("bio").get(0));
+            }
+            if (attributes.containsKey("location")) {
+                response.setLocation(attributes.get("location").get(0));
+            }
+            if (attributes.containsKey("dateOfBirth")) {
+                response.setDateOfBirth(attributes.get("dateOfBirth").get(0));
+            }
         }
 
         // Get actual realm roles from Keycloak

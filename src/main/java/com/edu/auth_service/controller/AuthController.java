@@ -190,7 +190,7 @@ public class AuthController {
         }
     }
 
-    @GetMapping("/profile")
+    @GetMapping("/get-profile")
     @Operation(summary = "Get user profile", 
                description = "Retrieves current user's profile from Keycloak")
     @SecurityRequirement(name = "Bearer Authentication")
@@ -212,9 +212,9 @@ public class AuthController {
         }
     }
 
-    @PutMapping("/profile")
-    @Operation(summary = "Update user profile", 
-               description = "Updates current user's profile information in Keycloak")
+    @PostMapping("/update-profile")
+    @Operation(summary = "Update user profile (Extended)", 
+               description = "Updates current user's profile with extended fields including bio, location, and date of birth")
     @SecurityRequirement(name = "Bearer Authentication")
     @ApiResponses(value = {
         @ApiResponse(responseCode = "200", description = "Profile updated successfully"),
@@ -222,15 +222,21 @@ public class AuthController {
         @ApiResponse(responseCode = "400", description = "Invalid input data"),
         @ApiResponse(responseCode = "404", description = "User not found")
     })
-    public ResponseEntity<Void> updateProfile(Authentication authentication, @Valid @RequestBody UserProfileResponse updateRequest) {
+    public ResponseEntity<Map<String, String>> updateProfileExtended(Authentication authentication, @Valid @RequestBody ProfileUpdateRequest updateRequest) {
         
         String userId = extractUserIdFromToken(authentication);
-        log.info("Profile update request for user ID: {}", userId);
+        log.info("Extended profile update request for user ID: {}", userId);
         
         try {
             authService.updateUserProfile(userId, updateRequest);
             log.info("Profile updated successfully for user ID: {}", userId);
-            return ResponseEntity.ok().build();
+            
+            Map<String, String> response = Map.of(
+                "status", "success",
+                "message", "Profile updated successfully"
+            );
+            
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
             log.error("Failed to update profile for user {}: {}", userId, e.getMessage());
             throw e;
@@ -337,6 +343,31 @@ public class AuthController {
             return ResponseEntity.ok("Password reset email sent successfully");
         } catch (Exception e) {
             log.error("Password reset failed for email {}: {}", request.getEmail(), e.getMessage());
+            throw e;
+        }
+    }
+
+    @PostMapping("/send-email-verification")
+    @Operation(summary = "Send email verification", 
+               description = "Sends email verification email to the authenticated user via Keycloak")
+    @SecurityRequirement(name = "Bearer Authentication")
+    @ApiResponses(value = {
+        @ApiResponse(responseCode = "200", description = "Email verification sent successfully"),
+        @ApiResponse(responseCode = "400", description = "Email already verified or user has no email"),
+        @ApiResponse(responseCode = "401", description = "Unauthorized - invalid or missing token"),
+        @ApiResponse(responseCode = "404", description = "User not found"),
+        @ApiResponse(responseCode = "500", description = "Email service error")
+    })
+    public ResponseEntity<String> sendEmailVerification(Authentication authentication) {
+        String userId = extractUserIdFromToken(authentication);
+        log.info("Email verification request for user ID: {}", userId);
+        
+        try {
+            keycloakPasswordService.sendEmailVerification(userId);
+            log.info("Email verification sent for user ID: {}", userId);
+            return ResponseEntity.ok("Email verification sent successfully");
+        } catch (Exception e) {
+            log.error("Email verification failed for user {}: {}", userId, e.getMessage());
             throw e;
         }
     }
