@@ -76,10 +76,20 @@ public class SecurityConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        configuration.setAllowedOriginPatterns(List.of("*"));
+        
+        // Allow specific origins for production
+        configuration.setAllowedOriginPatterns(List.of(
+            "https://*.edunex.app",
+            "http://localhost:*",
+            "https://localhost:*"
+        ));
+        
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         configuration.setAllowedHeaders(List.of("*"));
         configuration.setAllowCredentials(true);
+        
+        // Expose headers that might be needed
+        configuration.setExposedHeaders(List.of("Set-Cookie", "Authorization"));
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);

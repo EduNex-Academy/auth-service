@@ -127,7 +127,7 @@ public class AuthController {
             // Extract refresh token from HttpOnly cookie
             String refreshToken = extractRefreshTokenFromCookie(request);
 
-            if (refreshToken == null) {
+            if (refreshToken == null || refreshToken.trim().isEmpty()) {
                 throw new RuntimeException("Refresh token not found in cookies");
             }
 

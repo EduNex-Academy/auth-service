@@ -28,8 +28,9 @@ public class CookieConfig {
     /**
      * SameSite policy for cookies
      * Options: Strict, Lax, None
+     * Use "None" for cross-origin HTTPS requests with credentials
      */
-    private String sameSite = "Strict";
+    private String sameSite = "None";
 
     /**
      * Path for the cookies
