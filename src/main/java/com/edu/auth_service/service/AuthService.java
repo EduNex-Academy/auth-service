@@ -1,8 +1,7 @@
 package com.edu.auth_service.service;
 
 import com.edu.auth_service.dto.*;
-import com.edu.auth_service.entity.User;
-import com.edu.auth_service.repository.UserRepository;
+import com.edu.auth_service.util.KeycloakUserMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.keycloak.admin.client.Keycloak;
@@ -20,9 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.web.client.RestTemplate;
-
 import jakarta.ws.rs.core.Response;
-import java.time.LocalDateTime;
 import java.util.*;
 
 @Service
@@ -30,8 +27,7 @@ import java.util.*;
 @Slf4j
 public class AuthService {
 
-    private final Keycloak keycloak;
-    private final UserRepository userRepository;
+    private final Keycloak keycloakAdminClient;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${keycloak.realm}")
@@ -46,35 +42,55 @@ public class AuthService {
     @Value("${keycloak.server-url}")
     private String serverUrl;
 
-    public AuthResponse registerUser(UserRegistrationRequest request) {
+    /**
+     * Register a new user in Keycloak.
+     * Keycloak is the single source of truth
+     */
+    public Map<String, Object> registerUser(UserRegistrationRequest request) {
         try {
+            log.info("Registering user: {}", request.getUsername());
+            
+            // Validate Keycloak connection and permissions first
+            validateKeycloakConnection();
+
+            // Check if user already exists
+            if (userExists(request.getUsername(), request.getEmail())) {
+                throw new RuntimeException("User/Email already exists");
+            }
+
             // Create user in Keycloak
             String keycloakUserId = createKeycloakUser(request);
+            log.info("User created in Keycloak with ID: {}", keycloakUserId);
 
-            // Create user in local database
-            User user = createLocalUser(keycloakUserId, request);
-            userRepository.save(user);
-
-            // Assign role to user in Keycloak
+            // Assign a role to user
             assignRoleToUser(keycloakUserId, request.getRole());
+            log.info("Role {} assigned to user {}", request.getRole(), keycloakUserId);
 
-            // Authenticate user and return tokens
+            // Authenticate and return tokens
             return authenticateUser(request.getUsername(), request.getPassword());
 
         } catch (Exception e) {
-            log.error("Error registering user: ", e);
+            log.error("Error registering user {}: {}", request.getUsername(), e.getMessage(), e);
             throw new RuntimeException("Failed to register user: " + e.getMessage());
         }
     }
 
-    public AuthResponse authenticateUser(String username, String password) {
+    /**
+     * Authenticate user using Keycloak
+     * Uses OAuth2 Resource Owner Password Credentials Grant
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> authenticateUser(String username, String password) {
         try {
+            log.info("Authenticating user: {}", username);
+
             MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
             formData.add("grant_type", "password");
             formData.add("client_id", clientId);
             formData.add("client_secret", clientSecret);
             formData.add("username", username);
             formData.add("password", password);
+            formData.add("scope", "openid profile email");
 
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
@@ -83,36 +99,47 @@ public class AuthService {
                 new HttpEntity<>(formData, headers);
 
             String tokenUrl = serverUrl + "/realms/" + realm + "/protocol/openid-connect/token";
+            log.debug("Making token request to: {}", tokenUrl);
 
-            Map<String, Object> response = restTemplate.postForObject(
-                tokenUrl, request, Map.class);
+            Map<String, Object> response = restTemplate.postForObject(tokenUrl, request, Map.class);
 
             if (response != null && response.containsKey("access_token")) {
-                // Update last login time
-                User user = userRepository.findByUsername(username)
-                    .orElseThrow(() -> new RuntimeException("User not found"));
-                user.setLastLoginAt(LocalDateTime.now());
-                userRepository.save(user);
+                log.info("User {} authenticated successfully", username);
+                
+                // Get user profile from Keycloak
+                UserProfileResponse userProfile = getUserProfileFromKeycloak(username);
 
-                return new AuthResponse(
+                // Create AuthResponse without a refresh token for response body
+                AuthResponse authResponse = new AuthResponse(
                     (String) response.get("access_token"),
-                    (String) response.get("refresh_token"),
                     "Bearer",
                     ((Number) response.get("expires_in")).longValue(),
-                    mapToUserProfileResponse(user)
+                    userProfile
                 );
-            } else {
-                throw new RuntimeException("Authentication failed");
-            }
 
+                // Return both refresh token and auth response
+                Map<String, Object> result = new HashMap<>();
+                result.put("refreshToken", response.get("refresh_token"));
+                result.put("authResponse", authResponse);
+
+                return result;
+            } else {
+                throw new RuntimeException("Authentication failed - invalid response");
+            }
         } catch (Exception e) {
-            log.error("Authentication error: ", e);
+            log.error("Authentication failed for user {}: {}", username, e.getMessage(), e);
             throw new RuntimeException("Authentication failed: " + e.getMessage());
         }
     }
 
-    public AuthResponse refreshToken(String refreshToken) {
+    /**
+     * Refresh JWT token using refresh token
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, Object> refreshToken(String refreshToken) {
         try {
+            log.info("Refreshing token");
+
             MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
             formData.add("grant_type", "refresh_token");
             formData.add("client_id", clientId);
@@ -127,120 +154,381 @@ public class AuthService {
 
             String tokenUrl = serverUrl + "/realms/" + realm + "/protocol/openid-connect/token";
 
-            Map<String, Object> response = restTemplate.postForObject(
-                tokenUrl, request, Map.class);
+            Map<String, Object> response = restTemplate.postForObject(tokenUrl, request, Map.class);
 
             if (response != null && response.containsKey("access_token")) {
-                return new AuthResponse(
+                log.info("Token refreshed successfully");
+                
+                // Get user profile from the new access token
+                UserProfileResponse userProfile = getUserProfileFromAccessToken((String) response.get("access_token"));
+
+                // Create AuthResponse with user profile
+                AuthResponse authResponse = new AuthResponse(
                     (String) response.get("access_token"),
-                    (String) response.get("refresh_token"),
                     "Bearer",
                     ((Number) response.get("expires_in")).longValue(),
-                    null
+                    userProfile
                 );
+
+                // Return both refresh token and auth response
+                Map<String, Object> result = new HashMap<>();
+                result.put("refreshToken", response.get("refresh_token"));
+                result.put("authResponse", authResponse);
+
+                return result;
             } else {
                 throw new RuntimeException("Token refresh failed");
             }
 
         } catch (Exception e) {
-            log.error("Token refresh error: ", e);
+            log.error("Token refresh failed: {}", e.getMessage());
             throw new RuntimeException("Token refresh failed: " + e.getMessage());
         }
     }
 
-    private String createKeycloakUser(UserRegistrationRequest request) {
-        RealmResource realmResource = keycloak.realm(realm);
-        UsersResource usersResource = realmResource.users();
+    /**
+     * Get user profile from Keycloak (single source of truth)
+     */
+    public UserProfileResponse getUserProfile(String userId) {
+        try {
+            log.info("Getting user profile for ID: {}", userId);
+            
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UserResource userResource = realmResource.users().get(userId);
+            UserRepresentation user = userResource.toRepresentation();
 
-        UserRepresentation user = new UserRepresentation();
-        user.setUsername(request.getUsername());
-        user.setEmail(request.getEmail());
-        user.setFirstName(request.getFirstName());
-        user.setLastName(request.getLastName());
-        user.setEnabled(true);
-        user.setEmailVerified(true);
+            return mapKeycloakUserToProfile(user);
 
-        // Set password
-        CredentialRepresentation credential = new CredentialRepresentation();
-        credential.setType(CredentialRepresentation.PASSWORD);
-        credential.setValue(request.getPassword());
-        credential.setTemporary(false);
-        user.setCredentials(List.of(credential));
-
-        Response response = usersResource.create(user);
-
-        if (response.getStatus() == 201) {
-            String location = response.getHeaderString("Location");
-            return location.substring(location.lastIndexOf("/") + 1);
-        } else {
-            throw new RuntimeException("Failed to create user in Keycloak: " +
-                response.getStatusInfo().getReasonPhrase());
+        } catch (Exception e) {
+            log.error("Error getting user profile for ID {}: {}", userId, e.getMessage());
+            throw new RuntimeException("User not found: " + e.getMessage());
         }
     }
 
-    private User createLocalUser(String keycloakUserId, UserRegistrationRequest request) {
-        User user = new User();
-        user.setId(keycloakUserId);
-        user.setUsername(request.getUsername());
-        user.setEmail(request.getEmail());
-        user.setFirstName(request.getFirstName());
-        user.setLastName(request.getLastName());
-        user.setPhoneNumber(request.getPhoneNumber());
-        user.setRole(User.UserRole.valueOf(request.getRole()));
-        user.setIsActive(true);
-        user.setSubscriptionStatus(User.SubscriptionStatus.FREE);
-        return user;
+    /**
+     * Update user profile with ProfileUpdateRequest
+     */
+    public void updateUserProfile(String userId, ProfileUpdateRequest updateRequest) {
+        try {
+            log.info("Updating user profile for ID: {}", userId);
+
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UserResource userResource = realmResource.users().get(userId);
+            UserRepresentation user = userResource.toRepresentation();
+
+            // Update basic fields
+            if (updateRequest.getFirstName() != null && !updateRequest.getFirstName().trim().isEmpty()) {
+                user.setFirstName(updateRequest.getFirstName().trim());
+            }
+            if (updateRequest.getLastName() != null && !updateRequest.getLastName().trim().isEmpty()) {
+                user.setLastName(updateRequest.getLastName().trim());
+            }
+
+            // Update custom attributes
+            Map<String, List<String>> attributes = user.getAttributes();
+            if (attributes == null) {
+                attributes = new HashMap<>();
+            }
+            
+            if (updateRequest.getPhoneNumber() != null) {
+                if (updateRequest.getPhoneNumber().trim().isEmpty()) {
+                    attributes.remove("phoneNumber");
+                } else {
+                    attributes.put("phoneNumber", List.of(updateRequest.getPhoneNumber().trim()));
+                }
+            }
+            
+            if (updateRequest.getBio() != null) {
+                if (updateRequest.getBio().trim().isEmpty()) {
+                    attributes.remove("bio");
+                } else {
+                    attributes.put("bio", List.of(updateRequest.getBio().trim()));
+                }
+            }
+            
+            if (updateRequest.getLocation() != null) {
+                if (updateRequest.getLocation().trim().isEmpty()) {
+                    attributes.remove("location");
+                } else {
+                    attributes.put("location", List.of(updateRequest.getLocation().trim()));
+                }
+            }
+            
+            if (updateRequest.getDateOfBirth() != null) {
+                attributes.put("dateOfBirth", List.of(updateRequest.getDateOfBirth().toString()));
+            }
+            
+            if (updateRequest.getProfilePictureUrl() != null) {
+                if (updateRequest.getProfilePictureUrl().trim().isEmpty()) {
+                    attributes.remove("profilePictureUrl");
+                } else {
+                    attributes.put("profilePictureUrl", List.of(updateRequest.getProfilePictureUrl().trim()));
+                }
+            }
+
+            user.setAttributes(attributes);
+            userResource.update(user);
+
+            log.info("User profile updated successfully for ID: {}", userId);
+
+        } catch (Exception e) {
+            log.error("Error updating user profile for ID {}: {}", userId, e.getMessage());
+            throw new RuntimeException("Failed to update user profile: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Automatically logout user from Keycloak by invalidating all sessions
+     * This performs server-side logout without showing Keycloak UI
+     */
+    public void logoutUser(String userId) {
+        try {
+            log.info("Initiating automatic logout for user ID: {}", userId);
+
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UserResource userResource = realmResource.users().get(userId);
+
+            // Invalidate all user sessions
+            userResource.logout();
+
+            log.info("User {} successfully logged out from all sessions", userId);
+
+        } catch (Exception e) {
+            log.error("Error during automatic logout for user {}: {}", userId, e.getMessage());
+            throw new RuntimeException("Failed to logout user: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Validate Keycloak connection and permissions
+     */
+    private void validateKeycloakConnection() {
+        try {
+            log.info("Validating Keycloak connection and permissions for realm: {}", realm);
+
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UsersResource usersResource = realmResource.users();
+
+            // Try to list users with a small count to test permissions
+            usersResource.list(0, 1);
+            log.info("Keycloak connection validated successfully. Can access users resource.");
+
+        } catch (Exception e) {
+            log.error("Failed to validate Keycloak connection: {}", e.getMessage());
+            if (e.getMessage().contains("403") || e.getMessage().contains("Forbidden")) {
+                log.error("Permission denied. Please ensure the service account has proper roles assigned.");
+                log.error("Required roles in realm-management client: manage-users, view-users, query-users");
+            }
+            throw new RuntimeException("Keycloak connection validation failed: " + e.getMessage());
+        }
+    }
+
+    private boolean userExists(String username, String email) {
+        try {
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UsersResource usersResource = realmResource.users();
+
+            // Check by username
+            List<UserRepresentation> usersByUsername = usersResource.search(username, true);
+            if (!usersByUsername.isEmpty()) {
+                return true;
+            }
+
+            // Check by email
+            List<UserRepresentation> usersByEmail = usersResource.search(null, email, null, null, 0, 1);
+            return !usersByEmail.isEmpty();
+
+        } catch (Exception e) {
+            log.error("Error checking if user exists: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private String createKeycloakUser(UserRegistrationRequest request) {
+        try {
+            log.info("Creating user in Keycloak: {}", request.getUsername());
+
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UsersResource usersResource = realmResource.users();
+
+            UserRepresentation user = new UserRepresentation();
+            user.setUsername(request.getUsername());
+            user.setEmail(request.getEmail());
+            user.setFirstName(request.getFirstName());
+            user.setLastName(request.getLastName());
+            user.setEnabled(true);
+            user.setEmailVerified(false);
+
+            // Set custom attributes
+            Map<String, List<String>> attributes = new HashMap<>();
+            if (request.getPhoneNumber() != null) {
+                attributes.put("phoneNumber", List.of(request.getPhoneNumber()));
+            }
+            user.setAttributes(attributes);
+
+            // Set password
+            CredentialRepresentation credential = new CredentialRepresentation();
+            credential.setType(CredentialRepresentation.PASSWORD);
+            credential.setValue(request.getPassword());
+            credential.setTemporary(false);
+            user.setCredentials(List.of(credential));
+
+            log.debug("Attempting to create user with username: {} and email: {}",
+                     request.getUsername(), request.getEmail());
+
+            Response response = usersResource.create(user);
+            int statusCode = response.getStatus();
+
+            log.info("Keycloak user creation response - Status: {}, Reason: {}",
+                    statusCode, response.getStatusInfo().getReasonPhrase());
+
+            if (statusCode == 201) {
+                String location = response.getHeaderString("Location");
+                String userId = location.substring(location.lastIndexOf("/") + 1);
+                response.close();
+                log.info("User created successfully in Keycloak with ID: {}", userId);
+                return userId;
+            } else if (statusCode == 403) {
+                response.close();
+                log.error("Forbidden error creating user in Keycloak. This indicates insufficient permissions for the service account.");
+                log.error("Required permissions: The client '{}' service account needs 'manage-users' and 'view-users' roles from realm-management", clientId);
+                throw new RuntimeException("Forbidden: Insufficient permissions to create user. Please check Keycloak service account roles.");
+            } else if (statusCode == 409) {
+                response.close();
+                log.error("User already exists in Keycloak: {}", request.getUsername());
+                throw new RuntimeException("User already exists in Keycloak");
+            } else {
+                String reasonPhrase = response.getStatusInfo().getReasonPhrase();
+                response.close();
+                log.error("Failed to create user in Keycloak. Status: {}, Reason: {}", statusCode, reasonPhrase);
+                throw new RuntimeException("Failed to create user in Keycloak: " + reasonPhrase + " (Status: " + statusCode + ")");
+            }
+        } catch (Exception e) {
+            if (e instanceof RuntimeException) {
+                throw e;
+            }
+            log.error("Unexpected error creating user in Keycloak: {}", e.getMessage(), e);
+            throw new RuntimeException("Unexpected error creating user in Keycloak: " + e.getMessage());
+        }
     }
 
     private void assignRoleToUser(String userId, String roleName) {
-        RealmResource realmResource = keycloak.realm(realm);
-        UserResource userResource = realmResource.users().get(userId);
+        try {
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UserResource userResource = realmResource.users().get(userId);
 
-        RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
-        userResource.roles().realmLevel().add(List.of(role));
+            RoleRepresentation role = realmResource.roles().get(roleName).toRepresentation();
+            userResource.roles().realmLevel().add(List.of(role));
+
+        } catch (Exception e) {
+            log.error("Error assigning role {} to user {}: {}", roleName, userId, e.getMessage());
+            throw new RuntimeException("Failed to assign role: " + e.getMessage());
+        }
     }
 
-    private UserProfileResponse mapToUserProfileResponse(User user) {
-        UserProfileResponse response = new UserProfileResponse();
-        response.setId(user.getId());
-        response.setUsername(user.getUsername());
-        response.setEmail(user.getEmail());
-        response.setFirstName(user.getFirstName());
-        response.setLastName(user.getLastName());
-        response.setPhoneNumber(user.getPhoneNumber());
-        response.setProfilePictureUrl(user.getProfilePictureUrl());
-        response.setRole(user.getRole().name());
-        response.setIsActive(user.getIsActive());
-        response.setSubscriptionStatus(user.getSubscriptionStatus().name());
-        response.setSubscriptionExpiresAt(user.getSubscriptionExpiresAt());
-        response.setCreatedAt(user.getCreatedAt());
-        response.setLastLoginAt(user.getLastLoginAt());
-        return response;
+    private UserProfileResponse getUserProfileFromKeycloak(String username) {
+        try {
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+            UsersResource usersResource = realmResource.users();
+            
+            List<UserRepresentation> users = usersResource.search(username, true);
+            if (users.isEmpty()) {
+                throw new RuntimeException("User not found");
+            }
+
+            return mapKeycloakUserToProfile(users.get(0));
+
+        } catch (Exception e) {
+            log.error("Error getting user profile from Keycloak for username {}: {}", username, e.getMessage());
+            throw new RuntimeException("Failed to get user profile: " + e.getMessage());
+        }
     }
 
-    public UserProfileResponse getUserProfile(String userId) {
-        User user = userRepository.findById(userId)
-            .orElseThrow(() -> new RuntimeException("User not found"));
-        return mapToUserProfileResponse(user);
+    /**
+     * Get user profile from access token by calling Keycloak userinfo endpoint
+     */
+    @SuppressWarnings("unchecked")
+    private UserProfileResponse getUserProfileFromAccessToken(String accessToken) {
+        try {
+            log.debug("Getting user profile from access token");
+
+            HttpHeaders headers = new HttpHeaders();
+            headers.setBearerAuth(accessToken);
+
+            HttpEntity<Void> request = new HttpEntity<>(headers);
+
+            String userInfoUrl = serverUrl + "/realms/" + realm + "/protocol/openid-connect/userinfo";
+            Map<String, Object> userInfo = restTemplate.postForObject(userInfoUrl, request, Map.class);
+
+            if (userInfo != null) {
+                // Get the user ID from userInfo and fetch complete user data
+                String userId = (String) userInfo.get("sub");
+
+                RealmResource realmResource = keycloakAdminClient.realm(realm);
+                UserResource userResource = realmResource.users().get(userId);
+                UserRepresentation user = userResource.toRepresentation();
+
+                return mapKeycloakUserToProfile(user);
+            } else {
+                throw new RuntimeException("Failed to get user info from access token");
+            }
+
+        } catch (Exception e) {
+            log.error("Error getting user profile from access token: {}", e.getMessage());
+            throw new RuntimeException("Failed to get user profile from access token: " + e.getMessage());
+        }
     }
 
-    public void updateUserProfile(String userId, UserProfileResponse updateRequest) {
-        User user = userRepository.findById(userId)
-            .orElseThrow(() -> new RuntimeException("User not found"));
+    private UserProfileResponse mapKeycloakUserToProfile(UserRepresentation user) {
+        return KeycloakUserMapper.mapKeycloakUserToProfile(user, keycloakAdminClient, realm);
+    }
 
-        if (updateRequest.getFirstName() != null) {
-            user.setFirstName(updateRequest.getFirstName());
-        }
-        if (updateRequest.getLastName() != null) {
-            user.setLastName(updateRequest.getLastName());
-        }
-        if (updateRequest.getPhoneNumber() != null) {
-            user.setPhoneNumber(updateRequest.getPhoneNumber());
-        }
-        if (updateRequest.getProfilePictureUrl() != null) {
-            user.setProfilePictureUrl(updateRequest.getProfilePictureUrl());
-        }
+    /**
+     * Diagnostic method to check service account permissions
+     */
+    public void diagnoseForbiddenError() {
+        try {
+            log.info("=== KEYCLOAK PERMISSION DIAGNOSIS ===");
+            log.info("Realm: {}", realm);
+            log.info("Client ID: {}", clientId);
+            log.info("Server URL: {}", serverUrl);
 
-        userRepository.save(user);
+            RealmResource realmResource = keycloakAdminClient.realm(realm);
+
+            // Test 1: Access realm
+            try {
+                String realmName = realmResource.toRepresentation().getRealm();
+                log.info("✓ Can access realm: {}", realmName);
+            } catch (Exception e) {
+                log.error("✗ Cannot access realm: {}", e.getMessage());
+            }
+
+            // Test 2: Access users resource
+            try {
+                UsersResource usersResource = realmResource.users();
+                List<UserRepresentation> users = usersResource.list(0, 1);
+                log.info("✓ Can list users (count: {})", users.size());
+            } catch (Exception e) {
+                log.error("✗ Cannot list users: {}", e.getMessage());
+                if (e.getMessage().contains("403") || e.getMessage().contains("Forbidden")) {
+                    log.error("This indicates missing 'view-users' or 'query-users' permission");
+                }
+            }
+
+            // Test 3: Check service account roles
+            log.info("=== REQUIRED ACTIONS ===");
+            log.info("1. Go to Keycloak Admin Console");
+            log.info("2. Navigate to: Realms > {} > Clients > {}", realm, clientId);
+            log.info("3. Settings tab: Enable 'Service accounts enabled' and 'Authorization enabled'");
+            log.info("4. Service Account Roles tab: Add these roles from 'realm-management':");
+            log.info("   - manage-users");
+            log.info("   - view-users");
+            log.info("   - query-users");
+            log.info("   - view-realm");
+            log.info("5. Save and restart the application");
+
+        } catch (Exception e) {
+            log.error("Diagnosis failed: {}", e.getMessage());
+        }
     }
 }
